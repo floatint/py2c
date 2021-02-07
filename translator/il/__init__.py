@@ -11,3 +11,4 @@ from .Function import Function
 from .Implementation import Implementation
 from .Array import Array
 from .Value import Value
+from .FuncDef import FuncDef

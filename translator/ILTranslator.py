@@ -9,6 +9,7 @@ from .il.Call import Call
 from .il.Array import Array
 from .il.Value import Value
 from .il.Implementation import Implementation
+from .il.FuncDef import FuncDef
 from pathlib import Path
 import datetime as dt
 import ast
@@ -28,6 +29,8 @@ class ILTranslator:
         self.__source_code = None
         # Стек областей видимости
         self.__scope_stack = list()
+        # TODO: Список функций и методов модуля
+        self.__func_defs = list()
         # Определения функций и методов
         self.__func_decls = list()
         # Определение реализации функций и методов
@@ -132,12 +135,14 @@ class ILTranslator:
             if isinstance(s, ast.FunctionDef):
                 # найдем таблицу символов функции
                 func_sym_tbl = list(filter(lambda x: x.get_name() == s.name, self.__module_sym_tbl.get_children()))[0]
-                self._convert_def(s, func_sym_tbl)
+                self._translate_func(s, func_sym_tbl)
         # снимаем область видимости модуля
         self.__scope_stack.pop(-1)
 
     # конвертирование функции
     # TODO: а что на счет генераторов ?
+    # TODO: как вариант, сначала определить что перед нами
+    # TODO: чистая функция или генератор
     def _convert_def(self, func: ast.FunctionDef, sym: symtable.SymbolTable):
         # тело функции
         func_impl = list()
@@ -179,4 +184,159 @@ class ILTranslator:
 
     #
     def _convert_arguments(self, args: ast.arguments):
+        pass
+
+    # трансляция функции
+    def _translate_func(self, func: ast.FunctionDef, s: symtable.SymbolTable) -> FuncDef:
+        # создаем узел с описанием функции
+        func_def = FuncDef(get_resolved_name(self.__scope_stack, s.get_name()))
+        func_def.set_ret_type("PyObject*")
+        func_def.add_modifier("static")
+        # если функция глобальная (модуль)
+        if not s.is_nested():
+            func_def.add_parameter(
+                Declaration(
+                    "module"
+                ).set_type(
+                    "PyObject"
+                ).as_ptr()
+            )
+        # если функция вложенная или метод
+        elif s.is_nested() and self.__scope_stack[-1].get_type() == "function":
+            func_def.add_parameter(
+                Declaration(
+                    "context"
+                ).set_type(
+                    "PyObject"
+                ).as_ptr()
+            )
+
+        # далее нужно обработать аргументы
+        # задекларировать их
+        for a in s.get_symbols():
+            if a.is_parameter():
+                param_decl = Declaration(
+                    a.get_name()
+                ).set_type("PyObject").as_ptr()
+
+                if symbol_is_static(a, self.__scope_stack[-1]):
+                    param_decl.add_modifier("static")
+
+                self.__curr_func_declared.append(param_decl)
+
+        # сигнатура функции
+        if len(func.args.args) > 0:
+            func_def.add_parameter(
+                Declaration(
+                    "args"
+                ).set_type("PyObject").as_ptr()
+            )
+        if len(func.args.kwonlyargs) > 0:
+            if len(func_def.get_parameters()) == 0:
+                func_def.add_parameter(
+                    Declaration(
+                        "args"
+                    ).set_type("PyObject").as_ptr()
+                )
+            func_def.add_parameter(
+                Declaration(
+                    "kwargs"
+                ).set_type("PyObject").as_ptr()
+            )
+        # устанавливаем контекст текущей функции
+        self.__scope_stack.append(s)
+        for i in func.body:
+            if isinstance(i, ast.Assign):
+                mm = self._translate_assign(i)
+        # снимаем контекст
+        self.__scope_stack.pop(-1)
+
+        # попытка инициализации аргументов
+        # получим строку форматирования для PyArg_ParseTupleAndKeywords
+        init_args = If().add_condition_statement(
+
+        ).add_true_statement(
+            # в случае успеха переходим к инициализации
+            # опциональных переменных и глобальных
+            If().add_condition_statement(
+
+            ).add_true_statement(
+
+            )
+        ).add_false_statement(
+            # выполним возврат None, т.к. не удалось инициализоровать аргументы
+
+        )
+
+        # self._process_func_args(func.args, func_def, self.__scope_stack[-1])
+        # пытаемся выполнить инициализацию аргументов
+        # Для этого определяем
+        # инциализация глобальных переменных
+        # self._process_global_vars
+        return func_def
+
+    # TODO: трансляция регулярной функции
+    def _translate_module_def_func(self):
+        pass
+
+    # TODO: трансляция вложенной функции
+    def _translate_nested_def_func(self):
+        pass
+
+    # TODO: трансляция именованного генератора
+    def _translate_generator_def_func(self):
+        pass
+
+    # трансляция присваивания
+    # возвращает список IL нод
+    def _translate_assign(self, a: ast.Assign) -> list:
+        # готовый код
+        il_code = list()
+        # добавим информацию о транслируемой строке
+        il_code.append(
+            LineComment(
+                f"Begin(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
+            )
+        )
+
+        # начинаем трансляцию
+        # какие бывают варианты:
+        # 1) a, b = 1, 2 (множественное)
+        # 2) a = 10 (простое присваивание)
+        # 3) a.b = 10 (установка аттрибута)
+
+        target = a.targets[0]
+        value = a.value
+        if isinstance(target, ast.Name):
+            il_code.extend(self._translate_assign_to_variable(target, value))
+
+
+
+        # информируем о том, какая инструкция завершена
+        il_code.append(
+            LineComment(
+                f"End(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
+            )
+        )
+        # возвращаем собранный код
+        return il_code
+
+    # простое присваиваиние переменной (проверка на глобальность и т.д)
+    def _translate_assign_to_variable(self, target: ast.Name, value: ast.AST) -> list:
+        code_list = list()
+        # получим символ переменной
+        var_sym = None
+        for s in self.__scope_stack[-1].get_symbols():
+            if s.get_name() == target.id:
+                var_sym = s
+        # проверяем, задекларирована переменная или нет
+        if not var_sym.get_name() in self.__curr_func_declared:
+            code_list.extend(self.__declare_variable())
+
+        # создаем 
+
+        return code_list
+
+    # декларирует переменную и возвращает кусок кода с декларацией
+    def __declare_variable(self) -> list:
         pass

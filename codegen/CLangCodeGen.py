@@ -30,6 +30,8 @@ class CLangCodeGen(ICodeGen):
             return self._generate_array(n, indent)
         elif isinstance(n, Value):
             return self._generate_value(n)
+        elif isinstance(n, FuncDef):
+            return self._generate_func_def(n)
         else:
             return ""
 
@@ -133,6 +135,14 @@ class CLangCodeGen(ICodeGen):
             return f"\"{str(v.get_value())}\""
         else:
             return f"{str(v.get_value())}"
+
+    def _generate_func_def(self, f: FuncDef) -> str:
+        mods = " ".join([i for i in f.get_modifiers()])
+        params = ", ".join([self._dispacth_node(i, 0, False) for i in f.get_parameters()])
+        if f.has_implementation():
+            return f"{mods} {f.get_ret_type()} {f.get_name()}({params});".strip(" ")
+        else:
+            return f"{mods} {f.get_ret_type()} {f.get_name()}({params})".strip(" ")
 
     def __get_indent_str(self, n: int) -> str:
         return "".join(["\t" for i in range(n)])

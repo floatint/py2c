@@ -30,8 +30,8 @@ def get_args_fmt(args: ast.arguments) -> str:
 # резолв имени
 # с учетом вложенности неймспесов
 # например: top_outer_inner
-def get_resolved_name(scope_stack: [], symbol: symtable.Symbol) -> str:
-    return ""
+def get_resolved_name(scope_stack: [], name: str) -> str:
+    return "$".join([s.get_name() for s in scope_stack]) + "$" + name
 
 
 # определяет, нужно ли символ помечать как статический
