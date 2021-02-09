@@ -33,3 +33,8 @@ class ASTToILMapper:
         ).add_parameter(
             ast_str.s
         )
+
+    # функция, возвращающая IL узел кортежа
+    @staticmethod
+    def get_tuple_value(ast_tuple: ast.Tuple) -> Node:
+        pass
