@@ -12,3 +12,4 @@ from .Implementation import Implementation
 from .Array import Array
 from .Value import Value
 from .FuncDef import FuncDef
+from .FuncImpl import FuncImpl

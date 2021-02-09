@@ -1,4 +1,5 @@
 from .ITranslator import ITranslator
+from .il import *
 from .il.Module import Module
 from .il.Node import Node
 from .il.BlockComment import BlockComment
@@ -12,6 +13,7 @@ from .il.Implementation import Implementation
 from .il.FuncDef import FuncDef
 from pathlib import Path
 import datetime as dt
+from .ASTToILMapper import ASTToILMapper
 import ast
 import symtable
 from .helpers import *
@@ -120,7 +122,13 @@ class ILTranslator:
         self._convert_module()
 
         # оформляем итоговое представление
-
+        # сначала наполним модуль декларациями функций
+        for i in self.__func_decls:
+            self.__module.add_child(i)
+            self.__module.add_child(Newline())
+        # далее наполним реализациями
+        for i in self.__func_decls:
+            self.__module.add_child(self.__func_impls[i.get_name()])
         # возвращаем собранный код в IL
         return self.__module
 
@@ -135,6 +143,7 @@ class ILTranslator:
             if isinstance(s, ast.FunctionDef):
                 # найдем таблицу символов функции
                 func_sym_tbl = list(filter(lambda x: x.get_name() == s.name, self.__module_sym_tbl.get_children()))[0]
+                # транслируем функцию
                 self._translate_func(s, func_sym_tbl)
         # снимаем область видимости модуля
         self.__scope_stack.pop(-1)
@@ -243,30 +252,22 @@ class ILTranslator:
                     "kwargs"
                 ).set_type("PyObject").as_ptr()
             )
+        # добавляем декларацию в общий список
+        self.__func_decls.append(func_def)
         # устанавливаем контекст текущей функции
         self.__scope_stack.append(s)
+        # создаем блок имплементации
+        func_impl = FuncImpl(func_def)
         for i in func.body:
             if isinstance(i, ast.Assign):
-                mm = self._translate_assign(i)
+                func_impl.add_impl_node_block(self._translate_assign(i))
+        # добавляем в список реализацию
+        self.__func_impls[func_def.get_name()] = func_impl
         # снимаем контекст
         self.__scope_stack.pop(-1)
 
         # попытка инициализации аргументов
         # получим строку форматирования для PyArg_ParseTupleAndKeywords
-        init_args = If().add_condition_statement(
-
-        ).add_true_statement(
-            # в случае успеха переходим к инициализации
-            # опциональных переменных и глобальных
-            If().add_condition_statement(
-
-            ).add_true_statement(
-
-            )
-        ).add_false_statement(
-            # выполним возврат None, т.к. не удалось инициализоровать аргументы
-
-        )
 
         # self._process_func_args(func.args, func_def, self.__scope_stack[-1])
         # пытаемся выполнить инициализацию аргументов
@@ -295,7 +296,7 @@ class ILTranslator:
         # добавим информацию о транслируемой строке
         il_code.append(
             LineComment(
-                f"Begin(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
+                f"\tBegin(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
             )
         )
 
@@ -310,12 +311,10 @@ class ILTranslator:
         if isinstance(target, ast.Name):
             il_code.extend(self._translate_assign_to_variable(target, value))
 
-
-
         # информируем о том, какая инструкция завершена
         il_code.append(
             LineComment(
-                f"End(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
+                f"\tEnd(line: {a.lineno}, pos: {a.col_offset}) --> {self.__source_code[a.lineno - 1].strip()}"
             )
         )
         # возвращаем собранный код
@@ -331,12 +330,23 @@ class ILTranslator:
                 var_sym = s
         # проверяем, задекларирована переменная или нет
         if not var_sym.get_name() in self.__curr_func_declared:
-            code_list.extend(self.__declare_variable())
-
-        # создаем 
+            # значит тут декларация с инициализацией
+            # но что делать зависит от правой части присваивания
+            var_decl = Declaration(
+                var_sym.get_name()
+            ).set_type("PyObject").as_ptr()
+            # смотрим что стоит справа
+            # если просто число
+            if isinstance(value, ast.Num):
+                var_decl.set_initializer(ASTToILMapper.get_num_value(value))
+            elif isinstance(value, ast.Str):
+                var_decl.set_initializer(ASTToILMapper.get_str_value(value))
+            code_list.append(var_decl)
+        else:
+            # переменная уже была задекларирована
+            # TODO: тут еще стоит учесть что за переменная
+            # TODO: ибо может потребоваться разыменование
+            pass
+        # создаем
 
         return code_list
-
-    # декларирует переменную и возвращает кусок кода с декларацией
-    def __declare_variable(self) -> list:
-        pass

@@ -10,7 +10,7 @@ class FuncDef(Node):
         self.__ret_type = "void"
         self.__parameters = list()
         self.__modifiers = list()
-        self.__impl_block = list()
+        # self.__impl_block = list()
 
     def get_name(self) -> str:
         return self.__name
@@ -39,12 +39,16 @@ class FuncDef(Node):
         self.__parameters.append(param)
         return self
 
-    def has_implementation(self) -> bool:
-        return True if len(self.__impl_block) > 0 else False
-
-    def get_implementation_nodes(self) -> list:
-        return self.__impl_block
-
-    def add_implementation_node(self, n: Node):
-        self.__impl_block.append(n)
-        return self
+    # def has_implementation(self) -> bool:
+    #     return True if len(self.__impl_block) > 0 else False
+    #
+    # def get_implementation_nodes(self) -> list:
+    #     return self.__impl_block
+    #
+    # def add_implementation_node(self, n: Node):
+    #     self.__impl_block.append(n)
+    #     return self
+    #
+    # def add_implementation_block(self, b: list):
+    #     self.__impl_block.extend(b)
+    #     return self
