@@ -10,7 +10,10 @@ class Call(Node):
     def get_name(self) -> str:
         return self.__name
 
-    def add_parameter(self, p: Declaration):
+    # параметры представляются в виде различных объектов
+    # если это число или строка, то они будут вставлены напрямую в код
+    # если это объект IL, то кодогенератор сам даолжен решить что с ним делать
+    def add_parameter(self, p):
         self.__param_decls.append(p)
         return self
 
