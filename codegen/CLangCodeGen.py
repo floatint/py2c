@@ -19,19 +19,21 @@ class CLangCodeGen(ICodeGen):
         elif isinstance(n, Newline):
             return self._generate_newline(n)
         elif isinstance(n, Call):
-            return self._generate_call(n, indent)
+            return self._generate_call(n, indent, standalone)
         elif isinstance(n, Declaration):
             return self._generate_declaration(n, indent, standalone)
         elif isinstance(n, Function):
             return self._generate_function(n, standalone)
-        elif isinstance(n, Implementation):
-            return self._generate_func_impl(n, indent)
+        # elif isinstance(n, Implementation):
+        #     return self._generate_func_impl(n, indent)
         elif isinstance(n, Array):
             return self._generate_array(n, indent)
         elif isinstance(n, Value):
             return self._generate_value(n)
         elif isinstance(n, FuncDef):
             return self._generate_func_def(n)
+        elif isinstance(n, FuncImpl):
+            return self.__generate_func_impl(n, indent)
         else:
             return ""
 
@@ -51,7 +53,7 @@ class CLangCodeGen(ICodeGen):
         # return f"/*\n{c.get_text()}\n*/"
 
     def _generate_line_comment(self, c: LineComment, indent: int) -> str:
-        return self.__get_indent_str(indent) + c.get_text()
+        return self.__get_indent_str(indent) + "//" + self.__get_indent_str(indent) + c.get_text()
 
     def _generate_block_comment(self, c: BlockComment, indent: int) -> str:
         indent_str = self.__get_indent_str(indent)
@@ -73,9 +75,23 @@ class CLangCodeGen(ICodeGen):
     def _generate_newline(self, n: Newline) -> str:
         return "\n"
 
-    def _generate_call(self, c: Call, indent: int) -> str:
-        indent_str = self.__get_indent_str(indent)
-        args = ", ".join([self._dispacth_node(i, 0, False) for i in c.get_parameters()])
+    def _generate_call(self, c: Call, indent: int, standalone=True) -> str:
+        if standalone:
+            indent_str = self.__get_indent_str(indent)
+        else:
+            indent_str = ""
+        args = ""
+        for (i, v) in enumerate(c.get_parameters()):
+            if isinstance(v, Node):
+                args += self._dispacth_node(v, 0, False)
+            elif isinstance(v, str):
+                args += f"\"{str(v)}\""
+            else:
+                args += str(v)
+
+            if i < len(c.get_parameters()) - 1:
+                args += ", "
+        # args = ", ".join([self._dispacth_node(i, 0, False) for i in c.get_parameters()])
         return f"{indent_str}{c.get_name()}({args})"
 
     def _generate_declaration(self, d: Declaration, indent: int, standalone: bool) -> str:
@@ -115,11 +131,11 @@ class CLangCodeGen(ICodeGen):
         else:
             return f"{mods} {f.get_type()} {f.get_name()}({params})".strip(" ")
 
-    def _generate_func_impl(self, i: Implementation, indent: int) -> str:
-        impl = self._dispacth_node(i.get_function(), indent, standalone=False)
-        impl = f"{impl} {{\n{self._dispacth_node(i.get_implementation(), indent + 1)}\n}}"
-
-        return impl
+    # def _generate_func_impl(self, i: Implementation, indent: int) -> str:
+    #     impl = self._dispacth_node(i.get_function(), indent, standalone=False)
+    #     impl = f"{impl} {{\n{self._dispacth_node(i.get_implementation(), indent + 1)}\n}}"
+    #
+    #     return impl
 
     # генерация массива с элементами
     # mode отвечает за стиль генерации
@@ -136,13 +152,22 @@ class CLangCodeGen(ICodeGen):
         else:
             return f"{str(v.get_value())}"
 
-    def _generate_func_def(self, f: FuncDef) -> str:
+    def _generate_func_def(self, f: FuncDef, standalone=True) -> str:
         mods = " ".join([i for i in f.get_modifiers()])
         params = ", ".join([self._dispacth_node(i, 0, False) for i in f.get_parameters()])
-        if f.has_implementation():
+        if standalone:
             return f"{mods} {f.get_ret_type()} {f.get_name()}({params});".strip(" ")
         else:
             return f"{mods} {f.get_ret_type()} {f.get_name()}({params})".strip(" ")
+
+    def __generate_func_impl(self, func_impl: FuncImpl, indent: int) -> str:
+        indent_str = self.__get_indent_str(indent)
+        impl = self._dispacth_node(func_impl.get_func_def(), indent, False)
+        code_block = ""
+        for i in func_impl.get_impl():
+            code_block += f"{indent_str}" + self._dispacth_node(i, indent + 1, True) + "\n"
+        impl_block = f" {{\n{code_block}\n}};"
+        return impl + impl_block
 
     def __get_indent_str(self, n: int) -> str:
         return "".join(["\t" for i in range(n)])
