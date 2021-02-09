@@ -1,9 +1,26 @@
 # набор вспомогательных функций
 import ast
 import symtable
+from .il.Node import Node
 from .il.Function import Function
 from .il.Declaration import Declaration
 from .il.LineComment import LineComment
+
+
+# функция генерирует комментарий с пояснением
+# какая инструкция начинает транслироваться
+def statement_prologue(stmt: ast.AST, source_code: list) -> Node:
+    return LineComment(
+        f"\tBegin(line: {stmt.lineno}, pos: {stmt.col_offset}) --> {source_code[stmt.lineno - 1].strip()}"
+    )
+
+
+# функция генерирует комментарий с пояснением
+# какая инструкция окончила трансляцию
+def statement_epilogue(stmt: ast.AST, source_code: list) -> Node:
+    return LineComment(
+        f"\tEnd(line: {stmt.lineno}, pos: {stmt.col_offset}) --> {source_code[stmt.lineno - 1].strip()}"
+    )
 
 
 # собирает строку формата для
