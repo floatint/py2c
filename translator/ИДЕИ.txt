@@ -46,3 +46,67 @@ static, чтобы она не удалилась стеком
 2) Если в нем не нашли, то ищем в PyEval_GetGlobals()
 3) если и там нет, то в PyDict_GetItem(PyEval_GetGlobals(), "__builtins__")
 4) если и тут нет, то PeErr_Occurred()
+
+
+
+как обрабатывать Tuple, List, и др ?
+
+Положим, что есть такой кортеж:
+
+t = (1, "ss", (0,0), call(10), a.b)
+
+Сгенереный код:
+PyObject *call = ... // тут как-то найти call
+PyObject *a_b$ = ... // тут цепочка выборок аттрибута
+t = PyTuple_Pack(
+        5,
+        PyLong_FromLong(1),
+        PyUnicode_FromString("ss"),
+        PyTuple_Pack(2,
+            PyLong_FromLong(0),
+            PyLong_FromLong(0),
+        ),
+        PyObject_Call(call, PyLong_FromLong(10)),
+        a_b$
+)
+
+
+Как выбирать аттрибуты ?
+
+Положим, что есть аттрибут
+
+o.a1.a2.a3
+
+Проходимся слева на право, для начала декларируем итоговую переменную
+Как вариант, можно попробовать генерить для каждого поля свою переменную
+
+PyObject *o_a1_a2_a3$ = PyObject_GetAttrString(o, "a1");
+
+if (o_a1_a2_a3$ != NULL) {
+    // можно попробовать выбрать следующий
+    // при этом выполнить deref предыдущего
+} else {
+    // сделать что-то со всеми переменными, которые нужно освободить
+    // выполнить DecRef
+}
+
+
+PyObject *a1$ = PyObject_GetAttrString(o, "a1");
+if (a1 != NULL){
+    PyObject *a2$ = PyObject_GetAttrString(a1$, "a2");
+    if (a2$ != NULL){
+        PyObject *a3$ = PyObject_GetAttrString(a2$, "a3");
+        if (a3$ != NULL){
+            // тут уже основной код
+            // например, присваивание переменной
+            // my_var = a3$;
+        } else{
+            Py_XDECREF(a1$);
+            Py_XDECREF(a2$);
+        }
+    } else{
+        Py_XDECREF(a1$);
+    }
+} else{
+    // что то чистим
+}

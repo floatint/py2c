@@ -1,16 +1,6 @@
 from .ITranslator import ITranslator
 from .il import *
-from .il.Module import Module
-from .il.Node import Node
-from .il.BlockComment import BlockComment
-from .il.Include import Include
-from .il.Newline import Newline
-from .il.If import If
-from .il.Call import Call
-from .il.Array import Array
-from .il.Value import Value
-from .il.Implementation import Implementation
-from .il.FuncDef import FuncDef
+
 from pathlib import Path
 import datetime as dt
 from .ASTToILMapper import ASTToILMapper
@@ -67,59 +57,59 @@ class ILTranslator:
         self.__module.add_child(include_structmember_h)
         self.__module.add_child(Newline())
         self.__module.add_child(Newline())
-        self.__module.add_child(Declaration(
-            "my_arr"
-        ).set_type(
-            "const char*"
-        ).as_arr().set_initializer(
-            Array().add_element(
-                Value("my str").as_str()
-            ).add_element(
-                Value("NULL")
-            ).add_element(Array().add_element(
-                Value("0x45")
-            )).add_element(
-                Value("string long string").as_str()
-            )
-        ))
-
-        self.__module.add_child(Newline())
-        self.__module.add_child(Newline())
-
-
-
-        self.__module.add_child(Call(
-            "PyArg_ParseTuple"
-        ).add_parameter(
-            Declaration(
-                "ss"
-            ).set_type("PyObject").as_ptr()
-        ))
-        self.__module.add_child(Newline())
-        self.__module.add_child(Function(
-            "MyFunc"
-        ).set_type("PyObject*").add_parameter(
-            Declaration("module").set_type("PyObject").as_ptr()
-        ).add_parameter(
-            Declaration("args").set_type("PyObject").as_ptr()
-        ).set_comment(
-            LineComment(" Converted function")
-        ))
-
-        self.__module.add_child(Newline())
-        self.__module.add_child(Implementation(
-            Function(
-                "test_func"
-            ).set_type("PyObject*").add_parameter(
-                Declaration("self").set_type("PyObject").as_ptr()
-            ).add_modifier("static"),
-
-            BlockComment("This is function prolog")
-        ))
+        # self.__module.add_child(Declaration(
+        #     "my_arr"
+        # ).set_type(
+        #     "const char*"
+        # ).as_arr().set_initializer(
+        #     Array().add_element(
+        #         Value("my str").as_str()
+        #     ).add_element(
+        #         Value("NULL")
+        #     ).add_element(Array().add_element(
+        #         Value("0x45")
+        #     )).add_element(
+        #         Value("string long string").as_str()
+        #     )
+        # ))
+        #
+        # self.__module.add_child(Newline())
+        # self.__module.add_child(Newline())
+        #
+        #
+        #
+        # self.__module.add_child(Call(
+        #     "PyArg_ParseTuple"
+        # ).add_parameter(
+        #     Declaration(
+        #         "ss"
+        #     ).set_type("PyObject").as_ptr()
+        # ))
+        # self.__module.add_child(Newline())
+        # self.__module.add_child(Function(
+        #     "MyFunc"
+        # ).set_type("PyObject*").add_parameter(
+        #     Declaration("module").set_type("PyObject").as_ptr()
+        # ).add_parameter(
+        #     Declaration("args").set_type("PyObject").as_ptr()
+        # ).set_comment(
+        #     LineComment(" Converted function")
+        # ))
+        #
+        # self.__module.add_child(Newline())
+        # self.__module.add_child(Implementation(
+        #     Function(
+        #         "test_func"
+        #     ).set_type("PyObject*").add_parameter(
+        #         Declaration("self").set_type("PyObject").as_ptr()
+        #     ).add_modifier("static"),
+        #
+        #     BlockComment("This is function prolog")
+        # ))
 
         # конвертируем модуль
         # собираем в IL
-        self._convert_module()
+        self._translate_module()
 
         # оформляем итоговое представление
         # сначала наполним модуль декларациями функций
@@ -134,7 +124,7 @@ class ILTranslator:
 
     # основная функция конвертации модуля
     # на вход принимает исходный код, аст, и таблицу символов
-    def _convert_module(self):
+    def _translate_module(self):
         # устанавливаем область видимости модуля
         self.__scope_stack.append(self.__module_sym_tbl)
 
@@ -148,54 +138,10 @@ class ILTranslator:
         # снимаем область видимости модуля
         self.__scope_stack.pop(-1)
 
-    # конвертирование функции
+    # трансляция функции
     # TODO: а что на счет генераторов ?
     # TODO: как вариант, сначала определить что перед нами
     # TODO: чистая функция или генератор
-    def _convert_def(self, func: ast.FunctionDef, sym: symtable.SymbolTable):
-        # тело функции
-        func_impl = list()
-        # получим описание функции
-        decl = get_func_declaration(func, self.__scope_stack, self.__source_code)
-        # устанавливаем контекст функции
-        self.__scope_stack.append(sym)
-        # переменные которые задекларированы
-        declared_symbols = list()
-        for i in decl.get_parameters():
-            declared_symbols.append(i.get_name())
-        # декларираем все остальные (параметры и внешние переменные)
-        for i in sym.get_symbols():
-            if not i.get_name() in declared_symbols and (i.is_parameter() or i.is_free()):
-                # проверим символ на статику
-                is_static = symbol_is_static(i, sym)
-                func_impl.append(Declaration(
-                    i.get_name()
-                ).set_type("PyObject").add_modifier(
-                    "static" if is_static else None
-                ).as_ptr().set_initializer(
-                    "NULL"
-                ))
-                declared_symbols.append(i.get_name())
-
-        # проводим инициализацию параметров
-        # сначала идут free, потом args
-        # и смотрим еще откуда выборку делать
-        args_fmt = get_args_fmt(func.args)
-        parse_args_if = If()
-        parse_args_if.add_true_statement(
-            # если параметры разобраны успешно
-            None
-        )
-
-        # снимаем контекст
-        self.__scope_stack.pop(-1)
-
-
-    #
-    def _convert_arguments(self, args: ast.arguments):
-        pass
-
-    # трансляция функции
     def _translate_func(self, func: ast.FunctionDef, s: symtable.SymbolTable) -> FuncDef:
         # создаем узел с описанием функции
         func_def = FuncDef(get_resolved_name(self.__scope_stack, s.get_name()))
@@ -258,6 +204,10 @@ class ILTranslator:
         self.__scope_stack.append(s)
         # создаем блок имплементации
         func_impl = FuncImpl(func_def)
+        # попытка инициализации аргументов
+        # получим строку форматирования для PyArg_ParseTupleAndKeywords
+
+        # теперь приступаем к обработки тела функции
         for i in func.body:
             if isinstance(i, ast.Assign):
                 func_impl.add_impl_node_block(self._translate_assign(i))
@@ -265,15 +215,6 @@ class ILTranslator:
         self.__func_impls[func_def.get_name()] = func_impl
         # снимаем контекст
         self.__scope_stack.pop(-1)
-
-        # попытка инициализации аргументов
-        # получим строку форматирования для PyArg_ParseTupleAndKeywords
-
-        # self._process_func_args(func.args, func_def, self.__scope_stack[-1])
-        # пытаемся выполнить инициализацию аргументов
-        # Для этого определяем
-        # инциализация глобальных переменных
-        # self._process_global_vars
         return func_def
 
     # TODO: трансляция регулярной функции
@@ -308,6 +249,7 @@ class ILTranslator:
 
         target = a.targets[0]
         value = a.value
+        # случай, когда нужно присвоить значение переменной
         if isinstance(target, ast.Name):
             il_code.extend(self._translate_assign_to_variable(target, value))
 
@@ -339,8 +281,18 @@ class ILTranslator:
             # если просто число
             if isinstance(value, ast.Num):
                 var_decl.set_initializer(ASTToILMapper.get_num_value(value))
+            # если строка
             elif isinstance(value, ast.Str):
                 var_decl.set_initializer(ASTToILMapper.get_str_value(value))
+            # если аттрибут
+            elif isinstance(value, ast.Attribute):
+                # получаем код выборки аттрибута
+                # это список IL узлов
+                # полсдений узел - If
+                # в его true body происходит присваивание
+                hh = self.__translate_attribute(value, None)
+                # то здесь логика уже сложнее
+                # var_decl.set_initializer(ASTToILMapper.get_tuple_value(value))
             code_list.append(var_decl)
         else:
             # переменная уже была задекларирована
@@ -350,3 +302,80 @@ class ILTranslator:
         # создаем
 
         return code_list
+
+    # выборка аттрибута из объекта
+    # возвращает If() узел
+    # чтобы вызывающий код мог управлять
+    # поведением в случае, если аттрибут не найден
+    def __translate_attribute(self, attr: ast.Attribute, prev_il_code: list) -> list:
+        if prev_il_code is None:
+            prev_il_code = list()
+        # get_attr_node = If()
+        if isinstance(attr.value, ast.Attribute):
+            # сначала собираем цепочку
+            self.__translate_attribute(attr.value, prev_il_code)
+            attr_name = get_attr_name(attr)
+            attr_decl = self.__declare_var(attr_name, Call(
+                "PyObject_GetAttrString"
+            ).add_parameter(
+                Value(get_attr_name(attr.value))
+            ).add_parameter(
+                Value(attr.attr).as_str()
+            ))
+            get_attr_node = If(
+                    Compare("!=").set_left(
+                        Value(attr_name)
+                    ).set_right(Value("NULL"))
+                )
+
+
+        else:
+            # декларируем имя аттрибута
+            attr_name = get_attr_name(attr)
+            # выбираем аттрибут у какой-либо сущности
+            # для начала поймем что за сущность
+            # имя, строка или результат вызова
+            if isinstance(attr.value, ast.Name):
+                attr_decl = self.__declare_var(attr_name, Call(
+                    "PyObject_GetAttrString"
+                ).add_parameter(
+                    Value(attr.value)
+                ).add_parameter(
+                    Value(attr.attr).as_str()
+                ))
+                get_attr_node = If(
+                    Compare("!=").set_left(
+                        Value(attr_name)
+                    ).set_right(Value("NULL"))
+                )
+                if len(prev_il_code) == 0:
+                    prev_il_code.append(attr_decl)
+                    prev_il_code.append(get_attr_node)
+                else:
+                    prev_il_code[-1].add_true_statement(attr_decl)
+                    prev_il_code[-1].add_true_statement(get_attr_node)
+            elif isinstance(attr.value, ast.Call):
+                pass
+            elif isinstance(attr.value, ast.Str):
+                pass
+        return prev_il_code
+
+    # декларирует если нужно переменную с именем sym_name
+    # и возвращает код ее инициализации
+    # если переменная уже задекларирована, то возвращает None
+    def __declare_var(self, sym_name: str, default_value: Node = None) -> Node:
+        if sym_name not in self.__curr_func_declared:
+            self.__curr_func_declared.append(sym_name)
+            var_decl_node = Declaration(
+                sym_name
+            ).set_type("PyObject").as_ptr()
+            if default_value is not None:
+                var_decl_node.set_initializer(
+                    default_value
+                )
+            else:
+                var_decl_node.set_initializer(
+                    Value("NULL")
+                )
+
+            return var_decl_node

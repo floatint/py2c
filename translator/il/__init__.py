@@ -13,3 +13,5 @@ from .Array import Array
 from .Value import Value
 from .FuncDef import FuncDef
 from .FuncImpl import FuncImpl
+from .Compare import Compare
+from .If import If

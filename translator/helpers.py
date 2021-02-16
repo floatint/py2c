@@ -7,6 +7,11 @@ from .il.Declaration import Declaration
 from .il.LineComment import LineComment
 
 
+# получить имя аттрибута
+def get_attr_name(attr: ast.Attribute) -> str:
+    return attr.attr + "$"
+
+
 # функция генерирует комментарий с пояснением
 # какая инструкция начинает транслироваться
 def statement_prologue(stmt: ast.AST, source_code: list) -> Node:
