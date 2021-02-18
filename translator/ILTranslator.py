@@ -134,9 +134,49 @@ class ILTranslator:
                 # найдем таблицу символов функции
                 func_sym_tbl = list(filter(lambda x: x.get_name() == s.name, self.__module_sym_tbl.get_children()))[0]
                 # транслируем функцию
-                self._translate_func(s, func_sym_tbl)
+                self.__translate_func_def(s, func_sym_tbl)
         # снимаем область видимости модуля
         self.__scope_stack.pop(-1)
+
+    # трансляция функции
+    def __translate_func_def(self, func: ast.FunctionDef, st: symtable.SymbolTable):
+        func_def = FuncDef(get_resolved_name(self.__scope_stack, st.get_name()))
+        # имплементация функции
+        func_impl = FuncImpl(func_def)
+        func_def.set_ret_type("PyObject*")
+        func_def.add_modifier("static")
+        # если функция глобальная (модуль)
+        if not st.is_nested():
+            func_def.add_parameter(
+                Declaration(
+                    "module"
+                ).set_type(
+                    "PyObject"
+                ).as_ptr()
+            )
+        # если функция вложенная или метод
+        elif st.is_nested() and self.__scope_stack[-1].get_type() == "function":
+            func_def.add_parameter(
+                Declaration(
+                    "context"
+                ).set_type(
+                    "PyObject"
+                ).as_ptr()
+            )
+
+        # декларируем аргументы функции
+        for a in st.get_symbols():
+            if a.is_parameter():
+                func_impl.add_impl_node(self.__declare_var(a.get_name()))
+
+        # попробуем подгрузить аргументы
+        arg_load_block = If(Call(
+            get_system_name("parse_args")
+        ).add_parameter(
+
+        ))
+
+        a = 6
 
     # трансляция функции
     # TODO: а что на счет генераторов ?
@@ -198,6 +238,9 @@ class ILTranslator:
                     "kwargs"
                 ).set_type("PyObject").as_ptr()
             )
+        # попытка инициализации аргументов
+        # получим строку форматирования для PyArg_ParseTupleAndKeywords
+
         # добавляем декларацию в общий список
         self.__func_decls.append(func_def)
         # устанавливаем контекст текущей функции
@@ -314,20 +357,35 @@ class ILTranslator:
         if isinstance(attr.value, ast.Attribute):
             # сначала собираем цепочку
             self.__translate_attribute(attr.value, prev_il_code)
-            attr_name = get_attr_name(attr)
-            attr_decl = self.__declare_var(attr_name, Call(
+            get_attr_call = Call(
                 "PyObject_GetAttrString"
             ).add_parameter(
                 Value(get_attr_name(attr.value))
             ).add_parameter(
                 Value(attr.attr).as_str()
-            ))
+            )
+            attr_name = get_attr_name(attr)
+            attr_decl = self.__declare_var(attr_name, get_attr_call)
+
+            if attr_decl is None:
+                attr_decl = Assign().set_left(
+                    Value(attr_name)
+                ).set_right(
+                    get_attr_call
+                )
+
             get_attr_node = If(
                     Compare("!=").set_left(
                         Value(attr_name)
                     ).set_right(Value("NULL"))
                 )
 
+            if len(prev_il_code) == 0:
+                prev_il_code.append(attr_decl)
+                prev_il_code.append(get_attr_node)
+            else:
+                prev_il_code[-1].add_true_statement(attr_decl)
+                prev_il_code[-1].add_true_statement(get_attr_node)
 
         else:
             # декларируем имя аттрибута
@@ -336,13 +394,20 @@ class ILTranslator:
             # для начала поймем что за сущность
             # имя, строка или результат вызова
             if isinstance(attr.value, ast.Name):
-                attr_decl = self.__declare_var(attr_name, Call(
+                get_attr_call = Call(
                     "PyObject_GetAttrString"
                 ).add_parameter(
                     Value(attr.value)
                 ).add_parameter(
                     Value(attr.attr).as_str()
-                ))
+                )
+                attr_decl = self.__declare_var(attr_name, get_attr_call)
+                if attr_decl is None:
+                    attr_decl = Assign().set_left(
+                        Value(attr_name)
+                    ).set_right(
+                        get_attr_call
+                    )
                 get_attr_node = If(
                     Compare("!=").set_left(
                         Value(attr_name)
@@ -379,3 +444,5 @@ class ILTranslator:
                 )
 
             return var_decl_node
+        else:
+            return None

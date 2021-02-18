@@ -7,6 +7,11 @@ from .il.Declaration import Declaration
 from .il.LineComment import LineComment
 
 
+# получить системное имя
+# для использования готового кода
+def get_system_name(name: str) -> str:
+    return f"__{name}__$"
+
 # получить имя аттрибута
 def get_attr_name(attr: ast.Attribute) -> str:
     return attr.attr + "$"
