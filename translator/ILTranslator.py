@@ -167,72 +167,41 @@ class ILTranslator:
         required_args_count = len(args.args) - len(args.defaults)
         optional_args_count = len(args.defaults)
 
-        # декларируем аргументы функции (обязательные и опциональные)
-        for a in args.args:
-            param_decl = self.__declare_var(a.arg)
-            var_info = VariableInfo(a.arg)
-            var_info.as_declared()
-            if symbol_is_static(st.lookup(a.arg), st):
-                param_decl.add_modifier("static")
-            func_impl.add_impl_node(param_decl)
-        # если аргументы есть, обновим сигнатуру функции
-        if len(args.args) > 0 or args.vararg is not None:
-            func_def.add_parameter(
-                Declaration(ARGS_VAR_NAME).set_type("PyObject").as_ptr()
-            )
-        # если есть vararg
+        # собираем список аргументов функции (не keyword)
+        arg_list = list()
+        arg_list.extend(args.args)
         if args.vararg is not None:
-            param_decl = self.__declare_var(args.vararg.arg)
-            if symbol_is_static(st.lookup(args.vararg.arg), st):
-                param_decl.add_modifier("static")
-            func_impl.add_impl_node(param_decl)
-        # теперь keyword args
-        for a in args.kwonlyargs:
-            param_decl = self.__declare_var(a.arg)
-            if symbol_is_static(st.lookup(a.arg), st):
-                param_decl.add_modifier("static")
-            func_impl.add_impl_node(param_decl)
-        # если есть kwarg
-        if args.kwarg is not None:
-            param_decl = self.__declare_var(args.kwarg.arg)
-            if symbol_is_static(st.lookup(args.kwarg.arg), st):
-                param_decl.add_modifier("static")
-            func_impl.add_impl_node(param_decl)
+            arg_list.append(args.vararg)
 
-        # если есть keyword аргументы, то обновим сигнатуру
-        if len(args.kwonlyargs) > 0 or args.kwarg is not None:
-            if len(func_def.get_parameters()) < 2:
-                func_def.add_parameter(
-                    Declaration(
-                        ARGS_VAR_NAME
-                    ).set_type("PyObject").as_ptr()
-                )
-            func_def.add_parameter(
-                Declaration(
-                    KWARGS_VAR_NAME
-                ).set_type("PyObject").as_ptr()
-            )
+        # проходимся по ним
+        for a in arg_list:
+            var_info = func_info.get_variable(a.arg)
+            if not var_info.is_declared():
+                var_decl_node = self.__declare_var(a.arg)
+                if var_info.is_static():
+                    var_decl_node.add_modifier("static")
+                # помечаем, что переменная задекларирована
+                var_info.as_declared()
+                func_impl.add_impl_node(var_decl_node)
 
-        # попробуем подгрузить аргументы (обязательные и опциональные)
-        if len(self.__curr_func_declared) > 0:
+        # попытка инициализации аргументов (не keyword)
+        if len(arg_list) > 0:
             func_impl.add_impl_node(LineComment("Parse function arguments"))
-            # узел вызова функции парсинга аргументов
             call_parse_args = Call(get_system_name("parse_args")).add_parameter(
                 Value(ARGS_VAR_NAME)
             ).add_parameter(
-                Value(required_args_count)
+                Value(len(args.args) - len(args.defaults))
             ).add_parameter(
-                Value(optional_args_count)
+                Value(len(args.defaults))
             )
 
-            args_count = required_args_count + optional_args_count
-            args_count += 1 if args.vararg is not None else 0
-            for i in range(args_count):
+            # докидываем параметры в вызов функции
+            for i in arg_list:
                 call_parse_args.add_parameter(
-                    Value(self.__curr_func_declared[i]).as_ref()
+                    Value(i.arg).as_ref()
                 )
 
-            # если не получилось получить переданные аргументы
+            # блок с условием об успешном разборе параметров
             parse_args_check = If(LogicNot(
                 call_parse_args
             )).add_true_statement(
@@ -241,35 +210,52 @@ class ILTranslator:
                 Return(Call("PyErr_Occurred"))
             )
 
-            # добавим комментарий, что это пролог функции
-            func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
+            # добавляем в итоговый код
             func_impl.add_impl_node(parse_args_check)
 
-        # пробуем подгрузить keyword аргументы
-        if len(args.kwonlyargs) > 0 or args.kwarg is not None:
-            func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
+        # обрабатываем keyword аргументы
+        arg_list.clear()
+        arg_list.extend(args.kwonlyargs)
+        if args.kwarg is not None:
+            arg_list.append(args.kwarg)
 
-            kwd_arg_names = Array()
-            for i in args.kwonlyargs:
-                kwd_arg_names.add_element(
-                    Value(i.arg).as_str()
+        # проходимся по ним
+        for a in arg_list:
+            var_info = func_info.get_variable(a.arg)
+            if not var_info.is_declared():
+                var_decl_node = self.__declare_var(a.arg)
+                if var_info.is_static():
+                    var_decl_node.add_modifier("static")
+                var_info.as_declared()
+
+                func_impl.add_impl_node(var_decl_node)
+
+        # попытка инициализации keyword аргументов
+        if len(arg_list) > 0:
+            # получаем массив имен параметров
+            keyword_names = Array()
+            for a in arg_list:
+                keyword_names.add_element(
+                    Value(a.arg).as_str()
                 )
-            kwd_arg_names.add_element(Value("NULL"))
+            # в конце NULL
+            keyword_names.add_element(
+                Value("NULL")
+            )
+            func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
             call_parse_kwargs = Call(get_system_name("parse_kwargs")).add_parameter(
                 Value(KWARGS_VAR_NAME)
-            ).add_parameter(kwd_arg_names)
+            ).add_parameter(
+                keyword_names
+            )
 
-            for i in args.kwonlyargs:
+            # докидываем параметры в вызов функции
+            for i in arg_list:
                 call_parse_kwargs.add_parameter(
                     Value(i.arg).as_ref()
                 )
 
-            if args.kwarg is not None:
-                call_parse_kwargs.add_parameter(
-                    Value(args.kwarg.arg).as_ref()
-                )
-
-            # проверка на успешность парсинга
+            # блок с условием об успешном разборе параметров
             parse_kwargs_check = If(LogicNot(
                 call_parse_kwargs
             )).add_true_statement(
@@ -278,7 +264,134 @@ class ILTranslator:
                 Return(Call("PyErr_Occurred"))
             )
 
+            # добавляем в итоговый код
             func_impl.add_impl_node(parse_kwargs_check)
+
+        # если парсинг аргументов прошел успешно, то можно инициализировать
+        # значения по умолчанию
+        for i in range(len(args.defaults)):
+            func_impl.add_impl_node_block(self._translate_assign_to_variable(args.args[-(i+1)].arg, args.defaults[i]))
+
+
+        # вставим комментарий что это пролог функции
+        if len(func_impl.get_impl()) > 0:
+            func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
+            func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
+
+
+
+        # # декларируем аргументы функции (обязательные и опциональные)
+        # for a in args.args:
+        #     param_decl = self.__declare_var(a.arg)
+        #     var_info = VariableInfo(a.arg)
+        #     var_info.as_declared()
+        #     if symbol_is_static(st.lookup(a.arg), st):
+        #         param_decl.add_modifier("static")
+        #     func_impl.add_impl_node(param_decl)
+        # # если аргументы есть, обновим сигнатуру функции
+        # if len(args.args) > 0 or args.vararg is not None:
+        #     func_def.add_parameter(
+        #         Declaration(ARGS_VAR_NAME).set_type("PyObject").as_ptr()
+        #     )
+        # # если есть vararg
+        # if args.vararg is not None:
+        #     param_decl = self.__declare_var(args.vararg.arg)
+        #     if symbol_is_static(st.lookup(args.vararg.arg), st):
+        #         param_decl.add_modifier("static")
+        #     func_impl.add_impl_node(param_decl)
+        # # теперь keyword args
+        # for a in args.kwonlyargs:
+        #     param_decl = self.__declare_var(a.arg)
+        #     if symbol_is_static(st.lookup(a.arg), st):
+        #         param_decl.add_modifier("static")
+        #     func_impl.add_impl_node(param_decl)
+        # # если есть kwarg
+        # if args.kwarg is not None:
+        #     param_decl = self.__declare_var(args.kwarg.arg)
+        #     if symbol_is_static(st.lookup(args.kwarg.arg), st):
+        #         param_decl.add_modifier("static")
+        #     func_impl.add_impl_node(param_decl)
+        #
+        # # если есть keyword аргументы, то обновим сигнатуру
+        # if len(args.kwonlyargs) > 0 or args.kwarg is not None:
+        #     if len(func_def.get_parameters()) < 2:
+        #         func_def.add_parameter(
+        #             Declaration(
+        #                 ARGS_VAR_NAME
+        #             ).set_type("PyObject").as_ptr()
+        #         )
+        #     func_def.add_parameter(
+        #         Declaration(
+        #             KWARGS_VAR_NAME
+        #         ).set_type("PyObject").as_ptr()
+        #     )
+        #
+        # # попробуем подгрузить аргументы (обязательные и опциональные)
+        # if len(self.__curr_func_declared) > 0:
+        #     func_impl.add_impl_node(LineComment("Parse function arguments"))
+        #     # узел вызова функции парсинга аргументов
+        #     call_parse_args = Call(get_system_name("parse_args")).add_parameter(
+        #         Value(ARGS_VAR_NAME)
+        #     ).add_parameter(
+        #         Value(required_args_count)
+        #     ).add_parameter(
+        #         Value(optional_args_count)
+        #     )
+        #
+        #     args_count = required_args_count + optional_args_count
+        #     args_count += 1 if args.vararg is not None else 0
+        #     for i in range(args_count):
+        #         call_parse_args.add_parameter(
+        #             Value(self.__curr_func_declared[i]).as_ref()
+        #         )
+        #
+        #     # если не получилось получить переданные аргументы
+        #     parse_args_check = If(LogicNot(
+        #         call_parse_args
+        #     )).add_true_statement(
+        #         LineComment("Parse arguments fail")
+        #     ).add_true_statement(
+        #         Return(Call("PyErr_Occurred"))
+        #     )
+        #
+        #     # добавим комментарий, что это пролог функции
+        #     func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
+        #     func_impl.add_impl_node(parse_args_check)
+
+        # пробуем подгрузить keyword аргументы
+        # if len(args.kwonlyargs) > 0 or args.kwarg is not None:
+        #     func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
+        #
+        #     kwd_arg_names = Array()
+        #     for i in args.kwonlyargs:
+        #         kwd_arg_names.add_element(
+        #             Value(i.arg).as_str()
+        #         )
+        #     kwd_arg_names.add_element(Value("NULL"))
+        #     call_parse_kwargs = Call(get_system_name("parse_kwargs")).add_parameter(
+        #         Value(KWARGS_VAR_NAME)
+        #     ).add_parameter(kwd_arg_names)
+        #
+        #     for i in args.kwonlyargs:
+        #         call_parse_kwargs.add_parameter(
+        #             Value(i.arg).as_ref()
+        #         )
+        #
+        #     if args.kwarg is not None:
+        #         call_parse_kwargs.add_parameter(
+        #             Value(args.kwarg.arg).as_ref()
+        #         )
+        #
+        #     # проверка на успешность парсинга
+        #     parse_kwargs_check = If(LogicNot(
+        #         call_parse_kwargs
+        #     )).add_true_statement(
+        #         LineComment("Parse keyword arguments fail")
+        #     ).add_true_statement(
+        #         Return(Call("PyErr_Occurred"))
+        #     )
+        #
+        #     func_impl.add_impl_node(parse_kwargs_check)
 
         # далее, если все успешно, то можно инициализировать
         # опциональные аргументы
@@ -288,8 +401,8 @@ class ILTranslator:
             func_impl.add_impl_node_block(self.__translate_assign_to_var(args.args[-i].arg, args.defaults[i - 1]))
 
         # комментарий о том, что пролог завершен
-        if len(func_impl.get_impl()) != 0:
-            func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
+        # if len(func_impl.get_impl()) != 0:
+        #    func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
 
         # устанавливаем контекст функции
         # приступаем к обработке тела

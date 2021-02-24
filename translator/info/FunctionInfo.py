@@ -80,7 +80,7 @@ class FunctionInfo:
 
     # получить переменную по имени
     def get_variable(self, name: str) -> VariableInfo:
-        return None
+        return self.__variables[name]
 
     # генерация сигнатуры функции
     def __generate_func_def(self):
@@ -126,5 +126,15 @@ class FunctionInfo:
 
     # обработка переменных функции
     def __process_symbols(self):
-
-        pass
+        # проходимся по всем символам
+        for s in self.__sym_tbl.get_symbols():
+            # если это не вложенная функция или класс
+            if not s.is_namespace():
+                var_info = VariableInfo(s.get_name())
+                if s.is_parameter():
+                    var_info.as_parameter()
+                if s.is_local():
+                    var_info.as_local()
+                if s.is_free():
+                    var_info.as_static()
+                self.__variables[s.get_name()] = var_info

@@ -10,7 +10,7 @@ class VariableInfo:
         self.__name = name
         self.__is_declared = False
         self.__ref_cnt = 0
-        self.__type = None
+        self.__type = 0
         self.__is_initialized = False
 
     def get_name(self) -> str:
