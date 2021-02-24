@@ -1,8 +1,8 @@
 # класс содержит информацию о переменной функции
 
-IS_PARAMETER = 0
-IS_LOCAL = 1
-IS_STATIC = 2
+IS_PARAMETER = 1
+IS_LOCAL = 2
+IS_STATIC = 4
 
 
 class VariableInfo:
@@ -10,7 +10,6 @@ class VariableInfo:
         self.__name = name
         self.__is_declared = False
         self.__ref_cnt = 0
-        # TODO: может одновременно быть несколько состояний. Битовое или.
         self.__type = None
         self.__is_initialized = False
 
@@ -38,24 +37,27 @@ class VariableInfo:
         return True if self.__ref_cnt > 0 else False
 
     def is_parameter(self) -> bool:
-        return True if self.__type == IS_PARAMETER else False
+        return True if self.__type & IS_PARAMETER > 0 else False
+        # return True if self.__type == IS_PARAMETER else False
 
     def as_parameter(self):
-        self.__type = IS_PARAMETER
+        self.__type |= IS_PARAMETER
         return self
 
     def is_local(self) -> bool:
-        return True if self.__type == IS_LOCAL else False
+        return True if self.__type & IS_LOCAL > 0 else False
+        # return True if self.__type == IS_LOCAL else False
 
     def as_local(self):
-        self.__type = IS_LOCAL
+        self.__type |= IS_LOCAL
         return self
 
     def is_static(self) -> bool:
-        return True if self.__type == IS_STATIC else False
+        return True if self.__type & IS_STATIC > 0 else False
+        # return True if self.__type == IS_STATIC else False
 
     def as_static(self):
-        self.__type = IS_STATIC
+        self.__type |= IS_STATIC
         return self
 
     def is_initialized(self) -> bool:
