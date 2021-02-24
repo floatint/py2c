@@ -27,13 +27,21 @@ class CLangCodeGen(ICodeGen):
         # elif isinstance(n, Implementation):
         #     return self._generate_func_impl(n, indent)
         elif isinstance(n, Array):
-            return self._generate_array(n, indent)
+            return self._generate_array(n, indent, standalone)
         elif isinstance(n, Value):
             return self._generate_value(n)
         elif isinstance(n, FuncDef):
-            return self._generate_func_def(n)
+            return self._generate_func_def(n, standalone)
         elif isinstance(n, FuncImpl):
             return self.__generate_func_impl(n, indent)
+        elif isinstance(n, LogicNot):
+            return self.__generate_logic_not(n, indent)
+        elif isinstance(n, If):
+            return self.__generate_if(n, indent)
+        elif isinstance(n, Return):
+            return self.__generate_return(n, indent)
+        elif isinstance(n, BitwiseOr):
+            return self.__generate_bitwise_or(n)
         else:
             return ""
 
@@ -53,7 +61,7 @@ class CLangCodeGen(ICodeGen):
         # return f"/*\n{c.get_text()}\n*/"
 
     def _generate_line_comment(self, c: LineComment, indent: int) -> str:
-        return self.__get_indent_str(indent) + "//" + self.__get_indent_str(indent) + c.get_text()
+        return self.__get_indent_str(indent) + "//" + "\t" + c.get_text()
 
     def _generate_block_comment(self, c: BlockComment, indent: int) -> str:
         indent_str = self.__get_indent_str(indent)
@@ -98,7 +106,7 @@ class CLangCodeGen(ICodeGen):
         decl = self.__get_indent_str(indent)
         # собираем модификаторы
         if d.has_modifiers():
-            decl += " ".join([i for i in d.get_modifiers()])
+            decl += " ".join([i for i in d.get_modifiers()]) + " "
 
         decl += d.get_type() + " "
         if d.is_ptr():
@@ -131,24 +139,27 @@ class CLangCodeGen(ICodeGen):
         else:
             return f"{mods} {f.get_type()} {f.get_name()}({params})".strip(" ")
 
-    # def _generate_func_impl(self, i: Implementation, indent: int) -> str:
-    #     impl = self._dispacth_node(i.get_function(), indent, standalone=False)
-    #     impl = f"{impl} {{\n{self._dispacth_node(i.get_implementation(), indent + 1)}\n}}"
-    #
-    #     return impl
-
     # генерация массива с элементами
     # mode отвечает за стиль генерации
     # mode="compact" - элементы на одной строке
     # mode="full" - каждый элемент с новой строки
-    def _generate_array(self, a: Array, indent: int) -> str:
-        indent_str = self.__get_indent_str(indent)
-        elements = f",\n{indent_str}".join([self._dispacth_node(i, indent + 1) for i in a.get_elements()])
-        return f"{{\n{indent_str}{elements}\n{self.__get_indent_str(indent - 1)}}}"
+    def _generate_array(self, a: Array, indent: int, standalone=True) -> str:
+        if standalone:
+            indent_str = self.__get_indent_str(indent)
+            elements = f",\n{indent_str}".join([self._dispacth_node(i, indent + 1) for i in a.get_elements()])
+            return f"{{\n{indent_str}{elements}\n{self.__get_indent_str(indent - 1)}}}"
+        else:
+            elements = ", ".join([self._dispacth_node(i, indent, False) for i in a.get_elements()])
+            return f"{{ {elements} }}"
 
     def _generate_value(self, v: Value) -> str:
         if v.is_str():
             return f"\"{str(v.get_value())}\""
+        elif v.is_ref():
+            return f"&{str(v.get_value())}"
+        elif v.is_deref():
+            deref_str = "".join(["*" for i in range(v.get_deref_depth())])
+            return f"{deref_str}{str(v.get_value())}"
         else:
             return f"{str(v.get_value())}"
 
@@ -169,5 +180,22 @@ class CLangCodeGen(ICodeGen):
         impl_block = f" {{\n{code_block}\n}};"
         return impl + impl_block
 
+    def __generate_logic_not(self, logic_not: LogicNot, indent: int) -> str:
+        return f"!({self._dispacth_node(logic_not.get_value(), indent, False)})"
+
+    def __generate_if(self, if_stmt: If, indent: int) -> str:
+        indent_str = self.__get_indent_str(indent)
+        cond = self._dispacth_node(if_stmt.get_condition(), indent, False)
+        true_body = ""
+        for i in if_stmt.get_true_body():
+            true_body += f"{self._dispacth_node(i, indent + 1, False)}\n"
+        return f"{indent_str}if ({cond}) {{\n{true_body}\n{indent_str}}}"
+
+    def __generate_return(self, ret: Return, indent: int) -> str:
+        return f"{self.__get_indent_str(indent)}return {self._dispacth_node(ret.get_value(), indent, False)};"
+
+    def __generate_bitwise_or(self, b_or: BitwiseOr) -> str:
+        return f"{self._dispacth_node(b_or.get_left(), 0, False)} | {self._dispacth_node(b_or.get_right(), 0, False)}"
+    # для выравнивания кода
     def __get_indent_str(self, n: int) -> str:
         return "".join(["\t" for i in range(n)])

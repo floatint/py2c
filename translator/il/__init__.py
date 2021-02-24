@@ -16,3 +16,8 @@ from .FuncImpl import FuncImpl
 from .Compare import Compare
 from .If import If
 from .Assign import Assign
+from .LogicNot import LogicNot
+from .Return import Return
+from .If import If
+from .BitwiseOr import BitwiseOr
+

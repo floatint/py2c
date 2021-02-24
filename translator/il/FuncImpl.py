@@ -19,5 +19,13 @@ class FuncImpl(Node):
         self.__impl_body.extend(b)
         return self
 
+    def insert_impl_node(self, idx: int, node: Node):
+        self.__impl_body.insert(idx, node)
+        return self
+
+    def insert_impl_node_block(self, idx: int, block: list):
+        self.__impl_body[idx:idx] = block
+        return self
+
     def get_impl(self) -> list:
         return self.__impl_body

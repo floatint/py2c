@@ -4,6 +4,8 @@ from .il import *
 from pathlib import Path
 import datetime as dt
 from .ASTToILMapper import ASTToILMapper
+from .info.FunctionInfo import FunctionInfo
+from .info.VariableInfo import VariableInfo
 import ast
 import symtable
 from .helpers import *
@@ -23,10 +25,14 @@ class ILTranslator:
         self.__scope_stack = list()
         # TODO: Список функций и методов модуля
         self.__func_defs = list()
+        #
+        self.__func_dict = dict()
         # Определения функций и методов
         self.__func_decls = list()
         # Определение реализации функций и методов
         self.__func_impls = dict()
+        # Список переменных функции
+        self.__var_list = list()
         # Задекларированные символы в текущей функции
         self.__curr_func_declared = list()
         # Что нужно освободить в случае чего
@@ -41,7 +47,7 @@ class ILTranslator:
         # сопроводительная информация
         header_comment = BlockComment(f"""
             This file was auto-generated from {source_info["file_name"]}
-            Hash: {source_info["hash"]}
+            Hash MD5: {source_info["hash"]}
             Date: {dt.datetime.now()}
         """)
 
@@ -57,55 +63,6 @@ class ILTranslator:
         self.__module.add_child(include_structmember_h)
         self.__module.add_child(Newline())
         self.__module.add_child(Newline())
-        # self.__module.add_child(Declaration(
-        #     "my_arr"
-        # ).set_type(
-        #     "const char*"
-        # ).as_arr().set_initializer(
-        #     Array().add_element(
-        #         Value("my str").as_str()
-        #     ).add_element(
-        #         Value("NULL")
-        #     ).add_element(Array().add_element(
-        #         Value("0x45")
-        #     )).add_element(
-        #         Value("string long string").as_str()
-        #     )
-        # ))
-        #
-        # self.__module.add_child(Newline())
-        # self.__module.add_child(Newline())
-        #
-        #
-        #
-        # self.__module.add_child(Call(
-        #     "PyArg_ParseTuple"
-        # ).add_parameter(
-        #     Declaration(
-        #         "ss"
-        #     ).set_type("PyObject").as_ptr()
-        # ))
-        # self.__module.add_child(Newline())
-        # self.__module.add_child(Function(
-        #     "MyFunc"
-        # ).set_type("PyObject*").add_parameter(
-        #     Declaration("module").set_type("PyObject").as_ptr()
-        # ).add_parameter(
-        #     Declaration("args").set_type("PyObject").as_ptr()
-        # ).set_comment(
-        #     LineComment(" Converted function")
-        # ))
-        #
-        # self.__module.add_child(Newline())
-        # self.__module.add_child(Implementation(
-        #     Function(
-        #         "test_func"
-        #     ).set_type("PyObject*").add_parameter(
-        #         Declaration("self").set_type("PyObject").as_ptr()
-        #     ).add_modifier("static"),
-        #
-        #     BlockComment("This is function prolog")
-        # ))
 
         # конвертируем модуль
         # собираем в IL
@@ -113,12 +70,47 @@ class ILTranslator:
 
         # оформляем итоговое представление
         # сначала наполним модуль декларациями функций
-        for i in self.__func_decls:
+        for i in self.__func_defs:
             self.__module.add_child(i)
             self.__module.add_child(Newline())
+
+        # строим массив экспорта модуля
+        module_export_list = Array()
+        for i in self.__func_defs:
+            func_export = Array()
+            # TODO: нужно хранить реальное имя функции
+            func_export.add_element(
+                Value(i.get_name()).as_str()
+            ).add_element(
+                Value(i.get_name())
+            )
+            if len(i.get_parameters()) == 2:
+                func_export.add_element(
+                    Value("METH_VARARGS")
+                )
+            elif len(i.get_parameters()) == 3:
+                func_export.add_element(
+                    BitwiseOr(Value("METH_VARARGS"), Value("METH_KEYWORDS")))
+
+            func_export.add_element(
+                Value("doc string").as_str()
+            )
+
+            module_export_list.add_element(func_export)
+
+        self.__module.add_child(Declaration(
+            "test_methods"
+        ).add_modifier("static").set_type("PyMethodDef").as_arr().set_initializer(
+            module_export_list
+        ))
+
+        self.__module.add_child(Newline())
+
         # далее наполним реализациями
-        for i in self.__func_decls:
+        for i in self.__func_defs:
             self.__module.add_child(self.__func_impls[i.get_name()])
+            self.__module.add_child(Newline())
+            self.__module.add_child(Newline())
         # возвращаем собранный код в IL
         return self.__module
 
@@ -140,7 +132,13 @@ class ILTranslator:
 
     # трансляция функции
     def __translate_func_def(self, func: ast.FunctionDef, st: symtable.SymbolTable):
+
+        # создаем профиль функции
+
+        func_info = FunctionInfo(func.name, func, st, self.__scope_stack.copy())
+
         func_def = FuncDef(get_resolved_name(self.__scope_stack, st.get_name()))
+        self.__func_defs.append(func_def)
         # имплементация функции
         func_impl = FuncImpl(func_def)
         func_def.set_ret_type("PyObject*")
@@ -149,7 +147,7 @@ class ILTranslator:
         if not st.is_nested():
             func_def.add_parameter(
                 Declaration(
-                    "module"
+                    MODULE_CONTEXT_NAME
                 ).set_type(
                     "PyObject"
                 ).as_ptr()
@@ -158,25 +156,154 @@ class ILTranslator:
         elif st.is_nested() and self.__scope_stack[-1].get_type() == "function":
             func_def.add_parameter(
                 Declaration(
-                    "context"
+                    FUNCTION_CONTEXT_NAME
                 ).set_type(
                     "PyObject"
                 ).as_ptr()
             )
 
-        # декларируем аргументы функции
-        for a in st.get_symbols():
-            if a.is_parameter():
-                func_impl.add_impl_node(self.__declare_var(a.get_name()))
+        # работаем с аргументами
+        args = func.args
+        required_args_count = len(args.args) - len(args.defaults)
+        optional_args_count = len(args.defaults)
 
-        # попробуем подгрузить аргументы
-        arg_load_block = If(Call(
-            get_system_name("parse_args")
-        ).add_parameter(
+        # декларируем аргументы функции (обязательные и опциональные)
+        for a in args.args:
+            param_decl = self.__declare_var(a.arg)
+            var_info = VariableInfo(a.arg)
+            var_info.as_declared()
+            if symbol_is_static(st.lookup(a.arg), st):
+                param_decl.add_modifier("static")
+            func_impl.add_impl_node(param_decl)
+        # если аргументы есть, обновим сигнатуру функции
+        if len(args.args) > 0 or args.vararg is not None:
+            func_def.add_parameter(
+                Declaration(ARGS_VAR_NAME).set_type("PyObject").as_ptr()
+            )
+        # если есть vararg
+        if args.vararg is not None:
+            param_decl = self.__declare_var(args.vararg.arg)
+            if symbol_is_static(st.lookup(args.vararg.arg), st):
+                param_decl.add_modifier("static")
+            func_impl.add_impl_node(param_decl)
+        # теперь keyword args
+        for a in args.kwonlyargs:
+            param_decl = self.__declare_var(a.arg)
+            if symbol_is_static(st.lookup(a.arg), st):
+                param_decl.add_modifier("static")
+            func_impl.add_impl_node(param_decl)
+        # если есть kwarg
+        if args.kwarg is not None:
+            param_decl = self.__declare_var(args.kwarg.arg)
+            if symbol_is_static(st.lookup(args.kwarg.arg), st):
+                param_decl.add_modifier("static")
+            func_impl.add_impl_node(param_decl)
 
-        ))
+        # если есть keyword аргументы, то обновим сигнатуру
+        if len(args.kwonlyargs) > 0 or args.kwarg is not None:
+            if len(func_def.get_parameters()) < 2:
+                func_def.add_parameter(
+                    Declaration(
+                        ARGS_VAR_NAME
+                    ).set_type("PyObject").as_ptr()
+                )
+            func_def.add_parameter(
+                Declaration(
+                    KWARGS_VAR_NAME
+                ).set_type("PyObject").as_ptr()
+            )
 
-        a = 6
+        # попробуем подгрузить аргументы (обязательные и опциональные)
+        if len(self.__curr_func_declared) > 0:
+            func_impl.add_impl_node(LineComment("Parse function arguments"))
+            # узел вызова функции парсинга аргументов
+            call_parse_args = Call(get_system_name("parse_args")).add_parameter(
+                Value(ARGS_VAR_NAME)
+            ).add_parameter(
+                Value(required_args_count)
+            ).add_parameter(
+                Value(optional_args_count)
+            )
+
+            args_count = required_args_count + optional_args_count
+            args_count += 1 if args.vararg is not None else 0
+            for i in range(args_count):
+                call_parse_args.add_parameter(
+                    Value(self.__curr_func_declared[i]).as_ref()
+                )
+
+            # если не получилось получить переданные аргументы
+            parse_args_check = If(LogicNot(
+                call_parse_args
+            )).add_true_statement(
+                LineComment("Parse arguments fail")
+            ).add_true_statement(
+                Return(Call("PyErr_Occurred"))
+            )
+
+            # добавим комментарий, что это пролог функции
+            func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
+            func_impl.add_impl_node(parse_args_check)
+
+        # пробуем подгрузить keyword аргументы
+        if len(args.kwonlyargs) > 0 or args.kwarg is not None:
+            func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
+
+            kwd_arg_names = Array()
+            for i in args.kwonlyargs:
+                kwd_arg_names.add_element(
+                    Value(i.arg).as_str()
+                )
+            kwd_arg_names.add_element(Value("NULL"))
+            call_parse_kwargs = Call(get_system_name("parse_kwargs")).add_parameter(
+                Value(KWARGS_VAR_NAME)
+            ).add_parameter(kwd_arg_names)
+
+            for i in args.kwonlyargs:
+                call_parse_kwargs.add_parameter(
+                    Value(i.arg).as_ref()
+                )
+
+            if args.kwarg is not None:
+                call_parse_kwargs.add_parameter(
+                    Value(args.kwarg.arg).as_ref()
+                )
+
+            # проверка на успешность парсинга
+            parse_kwargs_check = If(LogicNot(
+                call_parse_kwargs
+            )).add_true_statement(
+                LineComment("Parse keyword arguments fail")
+            ).add_true_statement(
+                Return(Call("PyErr_Occurred"))
+            )
+
+            func_impl.add_impl_node(parse_kwargs_check)
+
+        # далее, если все успешно, то можно инициализировать
+        # опциональные аргументы
+
+        for i in range(len(args.defaults), 0, -1):
+            arg_name = args.args[-i].arg
+            func_impl.add_impl_node_block(self.__translate_assign_to_var(args.args[-i].arg, args.defaults[i - 1]))
+
+        # комментарий о том, что пролог завершен
+        if len(func_impl.get_impl()) != 0:
+            func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
+
+        # устанавливаем контекст функции
+        # приступаем к обработке тела
+        for s in func.body:
+            pass
+        # снимаем контекст функции
+        self.__curr_func_declared.clear()
+
+        # сохраняем реализацию
+        self.__func_impls[func_def.get_name()] = func_impl
+
+    # трансляция присвоения значения переменной
+    def __translate_assign_to_var(self, var_name: str, ast_value: ast.AST) -> list:
+        return list()
 
     # трансляция функции
     # TODO: а что на счет генераторов ?
@@ -259,18 +386,6 @@ class ILTranslator:
         # снимаем контекст
         self.__scope_stack.pop(-1)
         return func_def
-
-    # TODO: трансляция регулярной функции
-    def _translate_module_def_func(self):
-        pass
-
-    # TODO: трансляция вложенной функции
-    def _translate_nested_def_func(self):
-        pass
-
-    # TODO: трансляция именованного генератора
-    def _translate_generator_def_func(self):
-        pass
 
     # трансляция присваивания
     # возвращает список IL нод
@@ -428,7 +543,7 @@ class ILTranslator:
     # декларирует если нужно переменную с именем sym_name
     # и возвращает код ее инициализации
     # если переменная уже задекларирована, то возвращает None
-    def __declare_var(self, sym_name: str, default_value: Node = None) -> Node:
+    def __declare_var(self, sym_name: str, default_value: Node = None) -> Declaration:
         if sym_name not in self.__curr_func_declared:
             self.__curr_func_declared.append(sym_name)
             var_decl_node = Declaration(

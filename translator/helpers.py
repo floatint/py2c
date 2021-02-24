@@ -6,11 +6,26 @@ from .il.Function import Function
 from .il.Declaration import Declaration
 from .il.LineComment import LineComment
 
+# системные имена некоторых переменных
+MODULE_CONTEXT_NAME = "module$"
+CLASS_CONTEXT_NAME = "self$"
+FUNCTION_CONTEXT_NAME = "context$"
+ARGS_VAR_NAME = "args$"
+KWARGS_VAR_NAME = "kwargs$"
+
+
+# определяет, является ли имя "зарезервированым"
+def is_name_reserved(name: str) -> bool:
+    return name == MODULE_CONTEXT_NAME or \
+           name == CLASS_CONTEXT_NAME or \
+           name == FUNCTION_CONTEXT_NAME or \
+           name == ARGS_VAR_NAME or \
+           name == KWARGS_VAR_NAME
 
 # получить системное имя
 # для использования готового кода
 def get_system_name(name: str) -> str:
-    return f"__{name}__$"
+    return f"{name}$"
 
 # получить имя аттрибута
 def get_attr_name(attr: ast.Attribute) -> str:
