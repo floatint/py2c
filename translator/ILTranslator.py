@@ -6,6 +6,7 @@ import datetime as dt
 from .ASTToILMapper import ASTToILMapper
 from .info.FunctionInfo import FunctionInfo
 from .info.VariableInfo import VariableInfo
+from .modules import *
 import ast
 import symtable
 from .helpers import *
@@ -72,6 +73,7 @@ class ILTranslator:
         # сначала наполним модуль декларациями функций
         for i in self.__func_defs:
             self.__module.add_child(i)
+            self.__module.add_child(Newline())
             self.__module.add_child(Newline())
 
         # строим массив экспорта модуля
@@ -270,7 +272,8 @@ class ILTranslator:
         # если парсинг аргументов прошел успешно, то можно инициализировать
         # значения по умолчанию
         for i in range(len(args.defaults)):
-            func_impl.add_impl_node_block(self._translate_assign_to_variable(args.args[-(i+1)].arg, args.defaults[i]))
+            AssignILTranslator.assign_to_arg(args.args[-i], args.defaults[i], func_info)
+            # func_impl.add_impl_node_block(self.__translate_assign_to_var(args.args[-(i+1)].arg, args.defaults[i]))
 
 
         # вставим комментарий что это пролог функции
