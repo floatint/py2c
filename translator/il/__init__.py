@@ -11,3 +11,13 @@ from .Function import Function
 from .Implementation import Implementation
 from .Array import Array
 from .Value import Value
+from .FuncDef import FuncDef
+from .FuncImpl import FuncImpl
+from .Compare import Compare
+from .If import If
+from .Assign import Assign
+from .LogicNot import LogicNot
+from .Return import Return
+from .If import If
+from .BitwiseOr import BitwiseOr
+

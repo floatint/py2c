@@ -33,7 +33,7 @@ class Declaration(Node):
     def get_ptr_depth(self) -> int:
         return self.__ptr_depth
 
-    def as_ref(self) -> object:
+    def as_ref(self):
         self.__ref_depth += 1
         self.__ptr_depth = 0
         return self
@@ -44,7 +44,7 @@ class Declaration(Node):
     def get_ref_depth(self) -> int:
         return self.__ref_depth
 
-    def as_arr(self) -> object:
+    def as_arr(self):
         self.__arr_depth += 1
         return self
 
