@@ -1,15 +1,11 @@
-from .ITranslator import ITranslator
-from .il import *
-
-from pathlib import Path
 import datetime as dt
+from pathlib import Path
+
 from .ASTToILMapper import ASTToILMapper
-from .info.FunctionInfo import FunctionInfo
-from .info.VariableInfo import VariableInfo
-from .modules import *
-import ast
-import symtable
 from .helpers import *
+from .il import *
+from .info.FunctionInfo import FunctionInfo
+from .modules import *
 
 
 class ILTranslator:
@@ -25,6 +21,7 @@ class ILTranslator:
         # Стек областей видимости
         self.__scope_stack = list()
         # TODO: Список функций и методов модуля
+        self.__func_info_list = list()
         self.__func_defs = list()
         #
         self.__func_dict = dict()
@@ -71,28 +68,31 @@ class ILTranslator:
 
         # оформляем итоговое представление
         # сначала наполним модуль декларациями функций
-        for i in self.__func_defs:
-            self.__module.add_child(i)
+        for i in self.__func_info_list:
+            self.__module.add_child(i.get_definition())
             self.__module.add_child(Newline())
             self.__module.add_child(Newline())
 
         # строим массив экспорта модуля
         module_export_list = Array()
-        for i in self.__func_defs:
+        for i in self.__func_info_list:
             func_export = Array()
-            # TODO: нужно хранить реальное имя функции
             func_export.add_element(
                 Value(i.get_name()).as_str()
             ).add_element(
-                Value(i.get_name())
+                Value(i.get_mangled_name())
             )
-            if len(i.get_parameters()) == 2:
+            if len(i.get_definition().get_parameters()) == 2:
                 func_export.add_element(
                     Value("METH_VARARGS")
                 )
-            elif len(i.get_parameters()) == 3:
+            elif len(i.get_definition().get_parameters()) == 3:
                 func_export.add_element(
                     BitwiseOr(Value("METH_VARARGS"), Value("METH_KEYWORDS")))
+            elif len(i.get_definition().get_parameters()) == 1:
+                func_export.add_element(
+                    Value("METH_NOARGS")
+                )
 
             func_export.add_element(
                 Value("doc string").as_str()
@@ -113,6 +113,9 @@ class ILTranslator:
             self.__module.add_child(self.__func_impls[i.get_name()])
             self.__module.add_child(Newline())
             self.__module.add_child(Newline())
+
+        # генерируем module init функцию
+
         # возвращаем собранный код в IL
         return self.__module
 
@@ -138,11 +141,11 @@ class ILTranslator:
         # создаем профиль функции
 
         func_info = FunctionInfo(func.name, func, st, self.__scope_stack.copy())
-
-        func_def = FuncDef(get_resolved_name(self.__scope_stack, st.get_name()))
+        self.__func_info_list.append(func_info)
+        func_def = FuncDef(get_mangled_name(self.__scope_stack, st.get_name()))
         self.__func_defs.append(func_def)
         # имплементация функции
-        func_impl = FuncImpl(func_def)
+        func_impl = func_info.get_implementation()
         func_def.set_ret_type("PyObject*")
         func_def.add_modifier("static")
         # если функция глобальная (модуль)
@@ -189,7 +192,7 @@ class ILTranslator:
         # попытка инициализации аргументов (не keyword)
         if len(arg_list) > 0:
             func_impl.add_impl_node(LineComment("Parse function arguments"))
-            call_parse_args = Call(get_system_name("parse_args")).add_parameter(
+            call_parse_args = Call(get_mangled_name(None, "parse_args")).add_parameter(
                 Value(ARGS_VAR_NAME)
             ).add_parameter(
                 Value(len(args.args) - len(args.defaults))
@@ -214,6 +217,35 @@ class ILTranslator:
 
             # добавляем в итоговый код
             func_impl.add_impl_node(parse_args_check)
+
+        # инициализация значений по умолчанию
+        for i in range(len(args.defaults)):
+            cmp_node = Compare("==")
+            cmp_node.set_left(
+                Value(args.args[-(i + 1)].arg)
+            ).set_right(
+                Value("NULL")
+            )
+            if_node = If(cmp_node)
+            func_impl.add_impl_node(if_node)
+            if_node_idx = len(func_impl.get_impl())
+
+            AssignILTranslator.assign(args.args[-(i + 1)], args.defaults[i], func_info)
+            # TODO: may be fix this ?
+            if_node.add_true_statement(
+                LineComment(f"Set default value for \'{args.args[-(i + 1)].arg}\' argument start")
+            )
+            for j in range(if_node_idx, len(func_impl.get_impl())):
+                if_node.add_true_statement(
+                    func_impl.get_impl()[j]
+                )
+            if_node.add_true_statement(
+                LineComment(f"Set default value for \'{args.args[-(i + 1)].arg}\' argument end")
+            )
+            while len(func_impl.get_impl()) != if_node_idx:
+                func_impl.get_impl().pop()
+
+            func_impl.add_impl_node(Newline())
 
         # обрабатываем keyword аргументы
         arg_list.clear()
@@ -245,7 +277,7 @@ class ILTranslator:
                 Value("NULL")
             )
             func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
-            call_parse_kwargs = Call(get_system_name("parse_kwargs")).add_parameter(
+            call_parse_kwargs = Call(get_mangled_name(None, "parse_kwargs")).add_parameter(
                 Value(KWARGS_VAR_NAME)
             ).add_parameter(
                 keyword_names
@@ -269,11 +301,33 @@ class ILTranslator:
             # добавляем в итоговый код
             func_impl.add_impl_node(parse_kwargs_check)
 
-        # если парсинг аргументов прошел успешно, то можно инициализировать
-        # значения по умолчанию
-        for i in range(len(args.defaults)):
-            AssignILTranslator.assign_to_arg(args.args[-i], args.defaults[i], func_info)
-            # func_impl.add_impl_node_block(self.__translate_assign_to_var(args.args[-(i+1)].arg, args.defaults[i]))
+        # инициализация значений по умолчанию
+        for i in range(len(args.kwonlyargs)):
+            cmp_node = Compare("==")
+            cmp_node.set_left(
+                Value(args.kwonlyargs[i].arg)
+            ).set_right(
+                Value("NULL")
+            )
+            if_node = If(cmp_node)
+            func_impl.add_impl_node(if_node)
+            if_node_idx = len(func_impl.get_impl())
+            AssignILTranslator.assign(args.kwonlyargs[i], args.kw_defaults[i], func_info)
+            # TODO: may be fix this ?
+            if_node.add_true_statement(
+                LineComment(f"Set default value for \'{args.kwonlyargs[i].arg}\' argument start")
+            )
+            for j in range(if_node_idx, len(func_impl.get_impl())):
+                if_node.add_true_statement(
+                    func_impl.get_impl()[j]
+                )
+            if_node.add_true_statement(
+                LineComment(f"Set default value for \'{args.kwonlyargs[i].arg}\' argument end")
+            )
+            while len(func_impl.get_impl()) != if_node_idx:
+                func_impl.get_impl().pop()
+
+            func_impl.add_impl_node(Newline())
 
 
         # вставим комментарий что это пролог функции
@@ -281,131 +335,6 @@ class ILTranslator:
             func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
             func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
 
-
-
-        # # декларируем аргументы функции (обязательные и опциональные)
-        # for a in args.args:
-        #     param_decl = self.__declare_var(a.arg)
-        #     var_info = VariableInfo(a.arg)
-        #     var_info.as_declared()
-        #     if symbol_is_static(st.lookup(a.arg), st):
-        #         param_decl.add_modifier("static")
-        #     func_impl.add_impl_node(param_decl)
-        # # если аргументы есть, обновим сигнатуру функции
-        # if len(args.args) > 0 or args.vararg is not None:
-        #     func_def.add_parameter(
-        #         Declaration(ARGS_VAR_NAME).set_type("PyObject").as_ptr()
-        #     )
-        # # если есть vararg
-        # if args.vararg is not None:
-        #     param_decl = self.__declare_var(args.vararg.arg)
-        #     if symbol_is_static(st.lookup(args.vararg.arg), st):
-        #         param_decl.add_modifier("static")
-        #     func_impl.add_impl_node(param_decl)
-        # # теперь keyword args
-        # for a in args.kwonlyargs:
-        #     param_decl = self.__declare_var(a.arg)
-        #     if symbol_is_static(st.lookup(a.arg), st):
-        #         param_decl.add_modifier("static")
-        #     func_impl.add_impl_node(param_decl)
-        # # если есть kwarg
-        # if args.kwarg is not None:
-        #     param_decl = self.__declare_var(args.kwarg.arg)
-        #     if symbol_is_static(st.lookup(args.kwarg.arg), st):
-        #         param_decl.add_modifier("static")
-        #     func_impl.add_impl_node(param_decl)
-        #
-        # # если есть keyword аргументы, то обновим сигнатуру
-        # if len(args.kwonlyargs) > 0 or args.kwarg is not None:
-        #     if len(func_def.get_parameters()) < 2:
-        #         func_def.add_parameter(
-        #             Declaration(
-        #                 ARGS_VAR_NAME
-        #             ).set_type("PyObject").as_ptr()
-        #         )
-        #     func_def.add_parameter(
-        #         Declaration(
-        #             KWARGS_VAR_NAME
-        #         ).set_type("PyObject").as_ptr()
-        #     )
-        #
-        # # попробуем подгрузить аргументы (обязательные и опциональные)
-        # if len(self.__curr_func_declared) > 0:
-        #     func_impl.add_impl_node(LineComment("Parse function arguments"))
-        #     # узел вызова функции парсинга аргументов
-        #     call_parse_args = Call(get_system_name("parse_args")).add_parameter(
-        #         Value(ARGS_VAR_NAME)
-        #     ).add_parameter(
-        #         Value(required_args_count)
-        #     ).add_parameter(
-        #         Value(optional_args_count)
-        #     )
-        #
-        #     args_count = required_args_count + optional_args_count
-        #     args_count += 1 if args.vararg is not None else 0
-        #     for i in range(args_count):
-        #         call_parse_args.add_parameter(
-        #             Value(self.__curr_func_declared[i]).as_ref()
-        #         )
-        #
-        #     # если не получилось получить переданные аргументы
-        #     parse_args_check = If(LogicNot(
-        #         call_parse_args
-        #     )).add_true_statement(
-        #         LineComment("Parse arguments fail")
-        #     ).add_true_statement(
-        #         Return(Call("PyErr_Occurred"))
-        #     )
-        #
-        #     # добавим комментарий, что это пролог функции
-        #     func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
-        #     func_impl.add_impl_node(parse_args_check)
-
-        # пробуем подгрузить keyword аргументы
-        # if len(args.kwonlyargs) > 0 or args.kwarg is not None:
-        #     func_impl.add_impl_node(LineComment("Parse function keyword arguments"))
-        #
-        #     kwd_arg_names = Array()
-        #     for i in args.kwonlyargs:
-        #         kwd_arg_names.add_element(
-        #             Value(i.arg).as_str()
-        #         )
-        #     kwd_arg_names.add_element(Value("NULL"))
-        #     call_parse_kwargs = Call(get_system_name("parse_kwargs")).add_parameter(
-        #         Value(KWARGS_VAR_NAME)
-        #     ).add_parameter(kwd_arg_names)
-        #
-        #     for i in args.kwonlyargs:
-        #         call_parse_kwargs.add_parameter(
-        #             Value(i.arg).as_ref()
-        #         )
-        #
-        #     if args.kwarg is not None:
-        #         call_parse_kwargs.add_parameter(
-        #             Value(args.kwarg.arg).as_ref()
-        #         )
-        #
-        #     # проверка на успешность парсинга
-        #     parse_kwargs_check = If(LogicNot(
-        #         call_parse_kwargs
-        #     )).add_true_statement(
-        #         LineComment("Parse keyword arguments fail")
-        #     ).add_true_statement(
-        #         Return(Call("PyErr_Occurred"))
-        #     )
-        #
-        #     func_impl.add_impl_node(parse_kwargs_check)
-
-        # далее, если все успешно, то можно инициализировать
-        # опциональные аргументы
-
-        for i in range(len(args.defaults), 0, -1):
-            arg_name = args.args[-i].arg
-            func_impl.add_impl_node_block(self.__translate_assign_to_var(args.args[-i].arg, args.defaults[i - 1]))
-
-        # комментарий о том, что пролог завершен
-        # if len(func_impl.get_impl()) != 0:
-        #    func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
 
         # устанавливаем контекст функции
         # приступаем к обработке тела
@@ -417,17 +346,13 @@ class ILTranslator:
         # сохраняем реализацию
         self.__func_impls[func_def.get_name()] = func_impl
 
-    # трансляция присвоения значения переменной
-    def __translate_assign_to_var(self, var_name: str, ast_value: ast.AST) -> list:
-        return list()
-
     # трансляция функции
     # TODO: а что на счет генераторов ?
     # TODO: как вариант, сначала определить что перед нами
     # TODO: чистая функция или генератор
     def _translate_func(self, func: ast.FunctionDef, s: symtable.SymbolTable) -> FuncDef:
         # создаем узел с описанием функции
-        func_def = FuncDef(get_resolved_name(self.__scope_stack, s.get_name()))
+        func_def = FuncDef(get_mangled_name(self.__scope_stack, s.get_name()))
         func_def.set_ret_type("PyObject*")
         func_def.add_modifier("static")
         # если функция глобальная (модуль)

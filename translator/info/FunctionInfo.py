@@ -17,8 +17,6 @@ class FunctionInfo:
     def __init__(self, name: str, ast_node: ast.FunctionDef, sym_tbl: symtable.SymbolTable, scope_stack: list):
         # исходное имя функции
         self.__name = name
-        # имя функции в C коде
-        self.__mangled_name = hlp.get_system_name(name)
         # есть ли аргументы
         self.__has_args = False
         # есть ли "ключевые" аргументы
@@ -47,7 +45,7 @@ class FunctionInfo:
         return self.__name
 
     def get_mangled_name(self) -> str:
-        return self.__mangled_name
+        return hlp.get_mangled_name(self.__scope_stack, self.__name)
 
     def has_args(self) -> bool:
         return self.__has_args
@@ -80,11 +78,27 @@ class FunctionInfo:
 
     # получить переменную по имени
     def get_variable(self, name: str) -> VariableInfo:
-        return self.__variables[name]
+        try:
+            return self.__variables[name]
+        except KeyError:
+            return None
+
+    # зарегистрировать переменную в контексте функции
+    def add_variable(self, v: VariableInfo):
+        if v.get_name() in self.__variables:
+            raise RuntimeError(f"Variable {v.get_name()} already exists in {self} context")
+        self.__variables[v.get_name()] = v
+        return self
+
+    def get_tracked_variables(self):
+        for i in self.__variables:
+            var_info = self.__variables[i]
+            if var_info.is_tracked():
+                yield var_info
 
     # генерация сигнатуры функции
     def __generate_func_def(self):
-        func_def = FuncDef(hlp.get_resolved_name(self.__scope_stack, self.__sym_tbl.get_name()))
+        func_def = FuncDef(hlp.get_mangled_name(self.__scope_stack, self.__sym_tbl.get_name()))
         func_def.set_ret_type("PyObject*")
         func_def.add_modifier("static")
         # если функция глобальная (модуль)
@@ -135,6 +149,9 @@ class FunctionInfo:
                     var_info.as_parameter()
                 if s.is_local():
                     var_info.as_local()
+                if hlp.symbol_is_static(s, self.__sym_tbl):
+                    var_info.as_static()
+                # TODO: неверное определение когда находимся в top level функции
                 if s.is_free():
                     var_info.as_static()
                 self.__variables[s.get_name()] = var_info

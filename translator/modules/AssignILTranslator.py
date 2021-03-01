@@ -1,55 +1,95 @@
 # Класс реализует конвертацию инструкции присваивания
 import ast
-from translator.info.FunctionInfo import FunctionInfo
+from translator.info.FunctionInfo import FunctionInfo, VariableInfo
 from .ValueILTranslator import ValueASTTranslator
 from translator.il import *
 
 
 class AssignILTranslator:
 
-    # присваивание значения аргументу
+    # основной метод
     @staticmethod
-    def assign_to_arg(target: ast.arg, value: ast.AST, func_ctx: FunctionInfo):
-        # TODO: сначала нужно выполнить проверку на декларирование
-        # TODO: потом вызывать целевой метод
-        AssignILTranslator.__assign_to_sym(target.arg, value, func_ctx)
-        # для начала проверим, задекларирован ли аргумент
-        target_info = func_ctx.get_variable(target.arg)
-        if not target_info.is_declared():
-            # декларируем аргумент
-            pass
-        # получаем блок кода функции
-        func_impl = func_ctx.get_implementation()
-        # начинаем обработку value
-        value_il_node = ValueASTTranslator.get_value(value, func_ctx)
-        # после того как получили IL представление значения
-        # определим тип узла значения
-        if isinstance(value_il_node, Call):
-            # если значение - результат вызова функции
-            func_impl.add_impl_node(
-                Assign()
-            )
-        elif isinstance(value_il_node, If):
-            # если значение - цепочка условий,
-            # то код присваивания нужно в самом внутреннем блоке true
-            if_node = value_il_node
-            while len(if_node.get_true_body()) > 0:
-                # берем последний узел
-                if_node = if_node.get_true_body()[-1]
-            # нашли нужный блок if
-            # выполняем присваивание
-            if_node.add_true_statement(
-                Assign()
-            )
-            pass
-        pass
-
-    @staticmethod
-    def assign_to_name(target: ast.Name, value: ast.AST, func_ctx: FunctionInfo):
-        pass
-
+    def assign(targets: ast.AST, values: ast.AST, func_ctx: FunctionInfo):
+        if isinstance(targets, ast.arg):
+            AssignILTranslator.__assign_to_sym(targets.arg, values, func_ctx)
 
     # внутренний метод
     @staticmethod
     def __assign_to_sym(target_name: str, value: ast.AST, func_ctx: FunctionInfo):
-        pass
+
+        # для начала вычислим IL узел(ы) для value
+        value_il = ValueASTTranslator.get_value(value, func_ctx)
+        # проверяем, задекларирована переменная или нет
+        target_info = func_ctx.get_variable(target_name)
+        # получаем хранилище кода функции
+        func_code = func_ctx.get_implementation()
+        # если переменная не задекларирована
+        if target_info is None:
+            target_info = VariableInfo(target_name)
+            func_code.add_impl_node(
+                Declaration(
+                    target_name
+                ).set_type("PyObject").as_ptr().set_initializer(
+                    value_il
+                )
+            )
+            target_info.as_declared()
+            target_info.inc_ref()
+        else:
+            # отвязались от старого значения
+            if target_info.is_tracked():
+                target_info.dec_ref()
+                func_code.add_impl_node(
+                    Call(
+                        "Py_XDECREF"
+                    ).add_parameter(
+                        Value(target_info.get_name())
+                    )
+                )
+            # привязались к новому
+            if target_info.is_static():
+                left_value = Value(target_name).as_deref()
+            else:
+                left_value = Value(target_name)
+
+            func_code.add_impl_node(
+                Assign().set_left(left_value).set_right(value_il)
+            )
+
+        # проверка на NULL
+        tracked_vars = [i for i in func_ctx.get_tracked_variables() if i.get_name() != target_info.get_name()]
+        clean_list = list()
+        for i in tracked_vars:
+            clean_list.append(
+                Call(
+                    "Py_XDECREF"
+                ).add_parameter(
+                    Value(i.get_name())
+                )
+            )
+        cmp_node = Compare("==")
+        if target_info.is_static():
+            cmp_node.set_left(
+                Value(target_info.get_name()).as_deref()
+            )
+        else:
+            cmp_node.set_left(
+                Value(target_info.get_name())
+            )
+
+        cmp_node.set_right(
+            Value("NULL")
+        )
+        if_node = If(cmp_node).add_true_statements(
+            clean_list
+        ).add_true_statement(
+            Return(
+                Call(
+                    "PyErr_Occurred"
+                )
+            )
+        )
+
+        func_code.add_impl_node(
+            if_node
+        )

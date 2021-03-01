@@ -110,3 +110,28 @@ if (a1 != NULL){
 } else{
     // что то чистим
 }
+
+PyObject *a1$ = PyObject_GetAttrString(o, "a1");
+if (a1$ == NULL){
+    //cleanup
+    return PyErr_Occurred();
+}
+
+PyObject *a2$ = PyObject_GetAttrString(a1$, "a2");
+if (a2$ = NULL){
+    py_XDECREF(a1$);
+    return PyErr_Occurred();
+}
+
+PyObject *a3$ = PyObject_GetAttrString(a2$, "a3");
+if (a3$ = NULL){
+    py_XDECREF(a1$);
+    py_XDECREF(a3$);
+    return PyErr_Occurred();
+}
+
+a = a3$
+
+
+
+
