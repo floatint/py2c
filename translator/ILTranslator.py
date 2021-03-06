@@ -29,12 +29,8 @@ class ILTranslator:
         self.__func_decls = list()
         # Определение реализации функций и методов
         self.__func_impls = dict()
-        # Список переменных функции
-        self.__var_list = list()
         # Задекларированные символы в текущей функции
         self.__curr_func_declared = list()
-        # Что нужно освободить в случае чего
-        self.__curr_func_decref = list()
 
     # принимаем информацию о модуле,
     def translate(self, source_info: {}) -> Node:
@@ -329,17 +325,24 @@ class ILTranslator:
 
             func_impl.add_impl_node(Newline())
 
-
         # вставим комментарий что это пролог функции
         if len(func_impl.get_impl()) > 0:
             func_impl.insert_impl_node(0, LineComment(f"Function \"{func.name}\" prologue start"))
             func_impl.add_impl_node(LineComment(f"Function \"{func.name}\" prologue end"))
-
+            func_impl.add_impl_node(Newline())
 
         # устанавливаем контекст функции
         # приступаем к обработке тела
         for s in func.body:
-            pass
+            func_impl.add_impl_node(
+                LineComment(f"Line {s.lineno} -> \'{self.__source_code[s.lineno - 1].strip()}\' start")
+            )
+            if isinstance(s, ast.Assign):
+                AssignILTranslator.assign(s.targets, s.value, func_info)
+            func_impl.add_impl_node(
+                LineComment(f"Line {s.lineno} -> \'{self.__source_code[s.lineno - 1].strip()}\' end")
+            )
+            func_impl.add_impl_node(Newline())
         # снимаем контекст функции
         self.__curr_func_declared.clear()
 

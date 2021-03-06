@@ -3,6 +3,7 @@ import ast
 from translator.info.FunctionInfo import FunctionInfo, VariableInfo
 from .ValueILTranslator import ValueASTTranslator
 from translator.il import *
+from utils.exceptions.SourceError import SourceError
 
 
 class AssignILTranslator:
@@ -12,6 +13,17 @@ class AssignILTranslator:
     def assign(targets: ast.AST, values: ast.AST, func_ctx: FunctionInfo):
         if isinstance(targets, ast.arg):
             AssignILTranslator.__assign_to_sym(targets.arg, values, func_ctx)
+        if isinstance(targets, list):
+            if isinstance(values, (ast.List, ast.Tuple)):
+                if len(targets) > len(values):
+                    raise SourceError(targets.lineno, targets.col_offset, "Too few values on right side")
+                else:
+                    for i in range(len(targets)):
+                        if isinstance(targets[i], ast.Name):
+                            AssignILTranslator.__assign_to_sym(targets[i].id, values[i], func_ctx)
+            else:
+                if isinstance(targets[0], ast.Name):
+                    AssignILTranslator.__assign_to_sym(targets[0].id, values, func_ctx)
 
     # внутренний метод
     @staticmethod
@@ -47,6 +59,7 @@ class AssignILTranslator:
                     )
                 )
             # привязались к новому
+            target_info.inc_ref()
             if target_info.is_static():
                 left_value = Value(target_name).as_deref()
             else:

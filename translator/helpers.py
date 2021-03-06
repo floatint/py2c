@@ -6,11 +6,11 @@ from .il.LineComment import LineComment
 from .il.Node import Node
 
 # системные имена некоторых переменных
-MODULE_CONTEXT_NAME = "module$"
-CLASS_CONTEXT_NAME = "self$"
-FUNCTION_CONTEXT_NAME = "context$"
-ARGS_VAR_NAME = "args$"
-KWARGS_VAR_NAME = "kwargs$"
+MODULE_CONTEXT_NAME = "module$$"
+CLASS_CONTEXT_NAME = "self$$"
+FUNCTION_CONTEXT_NAME = "context$$"
+ARGS_VAR_NAME = "args$$"
+KWARGS_VAR_NAME = "kwargs$$"
 
 
 # манглинг имен
