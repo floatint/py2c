@@ -164,6 +164,9 @@ class CLangCodeGen(ICodeGen):
         elif v.is_deref():
             deref_str = "".join(["*" for i in range(v.get_deref_depth())])
             return f"{deref_str}{str(v.get_value())}"
+        elif isinstance(v.get_value(), Node):
+            return self._dispacth_node(v.get_value(), 0)
+            # return f"{str(v.get_value())}"
         else:
             return f"{str(v.get_value())}"
 

@@ -5,6 +5,7 @@ from translator.il.Node import Node
 from .NumberILTranslator import NumberILTranslator
 from .AttributeILTranslator import AttributeILTranslator
 from .ConstsILTranslator import ConstsILTranslator
+from .CallILTranslator import CallILTranslator
 
 
 class ValueASTTranslator:
@@ -17,4 +18,6 @@ class ValueASTTranslator:
             return AttributeILTranslator.get_attribute(value, func_ctx)
         elif isinstance(value, ast.NameConstant):
             return ConstsILTranslator.get_const(value)
+        elif isinstance(value, ast.Call):
+            return CallILTranslator.call(value, func_ctx)
 

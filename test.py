@@ -1,5 +1,5 @@
 def ar(a,b,c = a.b.c.d, *args, kw1 = 100, kw2 = 200, **kws):
-    ar = None
+    ar = ar()
     a = b.a1.a2.a3
     def g():
         print(c)
