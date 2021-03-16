@@ -52,5 +52,7 @@ int Py2C_SetAttrStringSafe(PyObject* o, const char* attr_name, PyObject* v);
 PyObject* Py2C_GetItem(PyObject* o, PyObject* key);
 PyObject* Py2C_GetItemSafe(PyObject* o, PyObject* key);
 int Py2C_SetItem(PyObject* o, PyObject* key, PyObject* v);
+PyObject* Py2C_Call(PyObject* callable, PyObject* args, PyObject* kwargs);
+PyObject* Py2C_CallSafe(PyObject* callable, PyObject* args, PyObject* kwargs);
 
 #endif // !PY_2_C
